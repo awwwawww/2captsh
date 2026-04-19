@@ -1,74 +1,92 @@
+import os
+import sys
+import subprocess
+
+# وظيفة لإجبار السيرفر على تثبيت المكتبات الناقصة فوراً
+def install_package(package):
+    subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+
+try:
+    from playwright_stealth import stealth_async
+except ImportError:
+    install_package("playwright-stealth")
+    from playwright_stealth import stealth_async
+
+try:
+    import google.generativeai as genai
+except ImportError:
+    install_package("google-generativeai")
+    import google.generativeai as genai
+
 import streamlit as st
 import asyncio
 from playwright.async_api import async_playwright
-from playwright_stealth import stealth_async
-import google.generativeai as genai
 
-# إعدادات الصفحة
-st.set_page_config(page_title="AI Captcha Solver", layout="wide")
-
+# --- إعدادات الواجهة ---
+st.set_page_config(page_title="AI Agent Solver", layout="wide")
 st.title("🤖 AI Captcha Web Agent")
 
-# مدخلات المستخدم
 with st.sidebar:
-    st.header("⚙️ الإعدادات")
     api_key = st.text_input("Gemini API Key", type="password")
     target_url = st.text_input("رابط الموقع", value="https://2captcha.com/enterpage")
-    run_btn = st.button("🚀 تشغيل الآن")
+    run_btn = st.button("🚀 تشغيل العميل")
 
-# أماكن العرض
-log_area = st.empty()
-img_area = st.empty()
+log_status = st.empty()
+display_col = st.columns(1)[0]
 
-async def solve():
+async def run_logic():
     if not api_key:
-        st.error("أدخل الـ API Key أولاً")
+        st.error("يرجى إدخال مفتاح API")
         return
 
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel('gemini-1.5-flash')
 
     async with async_playwright() as p:
-        log_area.info("⏳ جاري فتح المتصفح...")
+        log_status.info("⏳ جاري تحضير المتصفح...")
+        # إجبار السيرفر على تحميل محرك الكروم إذا لم يكن موجوداً
+        os.system("playwright install chromium") 
+        
         browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context()
-        page = await context.new_page()
+        page = await browser.new_page()
         await stealth_async(page)
 
         try:
-            await page.goto(target_url)
-            await asyncio.sleep(5)
+            log_status.info(f"🔗 فتح الرابط: {target_url}")
+            await page.goto(target_url, wait_until="networkidle")
+            await asyncio.sleep(2)
             
             # أخذ لقطة شاشة للمعاينة
-            await page.screenshot(path="screen.png")
-            img_area.image("screen.png", caption="رؤية البوت الحالية")
+            await page.screenshot(path="view.png")
+            st.image("view.png", caption="ما يراه العميل الآن")
 
-            # البحث عن الكابتشا
+            # محاولة حل الكابتشا
             captcha = await page.query_selector("img[src*='captcha'], canvas, .captcha-img")
             if captcha:
-                log_area.warning("📸 تم العثور على كابتشا، جاري الحل...")
+                log_status.warning("📸 اكتشاف كابتشا! جاري الحل بالذكاء الاصطناعي...")
                 await captcha.screenshot(path="cap.png")
                 
                 with open("cap.png", "rb") as f:
                     response = model.generate_content([
-                        "ما النص في الصورة؟ أجب بالنص فقط.",
+                        "ما هو النص في هذه الصورة؟ أجب بالنص فقط.",
                         {"mime_type": "image/png", "data": f.read()}
                     ])
                 
-                ans = response.text.strip()
-                log_area.success(f"✅ الحل: {ans}")
-                
-                # كتابة الحل
+                solution = response.text.strip()
+                log_status.success(f"✅ الحل المستخرج: {solution}")
+
                 input_box = await page.query_selector("input[type='text'], input[name*='captcha']")
                 if input_box:
-                    await input_box.fill(ans)
+                    await input_box.fill(solution)
                     await page.keyboard.press("Enter")
-                    log_area.success("🚀 تم إرسال الحل!")
+                    log_status.success("🚀 تم إرسال الحل!")
             else:
-                log_area.error("❌ لم يتم العثور على كابتشا")
+                log_status.error("❌ لم يتم العثور على كابتشا")
+
         except Exception as e:
-            st.error(f"خطأ: {e}")
+            st.error(f"حدث خطأ: {e}")
+        
         await browser.close()
 
 if run_btn:
-    asyncio.run(solve())
+    asyncio.run(run_logic())
