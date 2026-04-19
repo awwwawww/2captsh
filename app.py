@@ -1,4 +1,25 @@
 import os
+import subprocess
+import sys
+
+# إجبار السيرفر على تثبيت المكتبة يدوياً قبل بدء الاستدعاء
+def force_install():
+    try:
+        import playwright_stealth
+    except ImportError:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "playwright-stealth"])
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "playwright"])
+        os.system("playwright install chromium")
+        st.rerun()
+
+import streamlit as st
+force_install()
+
+# الآن يمكنك استدعاء المكتبات بأمان
+from playwright_stealth import stealth_async
+from playwright.async_api import async_playwright
+import google.generativeai as genai
+import os
 import sys
 import subprocess
 
