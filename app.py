@@ -1,91 +1,117 @@
 import streamlit as st
 import asyncio
+import os
+import sys
+
+# --- حل مشكلة المكتبات الناقصة برمجياً ---
+def install_requirements():
+    try:
+        from playwright.async_api import async_playwright
+        from playwright_stealth import stealth_async
+        import google.generativeai as genai
+    except ImportError:
+        st.info("📦 جاري تهيئة بيئة العمل وتثبيت المكتبات اللازمة... قد يستغرق هذا دقيقة.")
+        os.system("pip install playwright playwright-stealth google-generativeai")
+        os.system("playwright install chromium")
+        st.rerun()
+
+install_requirements()
+
 from playwright.async_api import async_playwright
 from playwright_stealth import stealth_async
 import google.generativeai as genai
-import os
-from datetime import datetime
-import os
-os.system("playwright install chromium")
 
-st.set_page_config(page_title="AI Captcha Solver Web", layout="wide")
+# إعدادات الصفحة
+st.set_page_config(page_title="AI Captcha Web Agent v2", layout="wide")
 
-st.title("🤖 AI Captcha Web Agent")
-st.markdown("تحويل الذكاء الاصطناعي إلى عميل يقوم بحل الكابتشا آلياً")
+st.title("🤖 AI Captcha Web Agent - النسخة الاحترافية")
+st.markdown("---")
 
-# مدخلات المستخدم
+# واجهة المستخدم في الشريط الجانبي
 with st.sidebar:
-    api_key = st.text_input("Gemini API Key", type="password")
-    target_url = st.text_input("Target URL", value="https://2captcha.com/enterpage")
-    run_btn = st.button("🚀 إطلاق العميل")
+    st.header("⚙️ الإعدادات")
+    api_key = st.text_input("Gemini API Key", type="password", help="أدخل مفتاح جوجل جيمناي")
+    target_url = st.text_input("رابط الموقع المستهدف", value="https://2captcha.com/enterpage")
+    st.markdown("---")
+    run_btn = st.button("🚀 إطلاق العميل الذكي", use_container_width=True)
 
-# حاويات العرض
-status_log = st.empty()
-col1, col2 = st.columns(2)
-screenshot_placeholder = col1.empty()
-result_placeholder = col2.empty()
+# تقسيم الشاشة للعرض
+col1, col2 = st.columns([2, 1])
+with col1:
+    st.subheader("📺 بث حي لرؤية العميل")
+    screenshot_placeholder = st.empty()
+with col2:
+    st.subheader("📝 سجل العمليات")
+    log_placeholder = st.empty()
 
-async def solve_captcha_web():
+def update_log(msg, type="info"):
+    if type == "info": st.toast(msg)
+    log_placeholder.write(f"[{sys.platform}] {msg}")
+
+async def run_agent():
     if not api_key:
-        st.error("يرجى إدخال API Key")
+        st.error("⚠️ يرجى إدخال Gemini API Key أولاً!")
         return
 
+    # إعداد Gemini
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel('gemini-1.5-flash')
 
     async with async_playwright() as p:
-        status_log.info("🌐 جاري تشغيل المتصفح الخفي...")
-        # ملاحظة: في الاستضافة (Streamlit Cloud) يجب إعداد المتصفح بشكل خاص
-        browser = await p.chromium.launch(headless=True) 
-        context = await browser.new_context(viewport={'width': 1280, 'height': 720})
+        update_log("🌐 جاري تشغيل المتصفح (Chromium)...")
+        # تشغيل المتصفح في وضع الخفاء للسيرفر
+        browser = await p.chromium.launch(headless=True)
+        context = await browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
         page = await context.new_page()
         await stealth_async(page)
 
         try:
-            status_log.info(f"🔗 الدخول إلى: {target_url}")
-            await page.goto(target_url, wait_until="networkidle")
+            update_log(f"🔗 الانتقال إلى: {target_url}")
+            await page.goto(target_url, wait_until="domcontentloaded")
+            await asyncio.sleep(3)
             
-            # أخذ لقطة شاشة أولية
+            # تحديث الصورة للمستخدم
             await page.screenshot(path="view.png")
-            screenshot_placeholder.image("view.png", caption="رؤية العميل الحالية")
+            screenshot_placeholder.image("view.png")
 
             # البحث عن الكابتشا
-            status_log.warning("🔍 جاري البحث عن كابتشا...")
-            captcha = await page.query_selector("img[src*='captcha'], canvas, .captcha-img")
+            update_log("🔍 فحص الصفحة بحثاً عن كابتشا...")
+            captcha = await page.query_selector("img[src*='captcha'], canvas, .captcha-img, #captcha-img")
             
             if captcha:
+                update_log("📸 تم اكتشاف كابتشا! جاري التحليل برؤية الذكاء الاصطناعي...")
                 await captcha.screenshot(path="captcha_crop.png")
-                result_placeholder.image("captcha_crop.png", caption="الكابتشا التي رآها العميل")
                 
-                # تحليل Gemini
-                status_log.info("🧠 Gemini يقوم بالتحليل والحل...")
+                # إرسال الصورة لـ Gemini
                 with open("captcha_crop.png", "rb") as f:
                     response = model.generate_content([
-                        "ما هو النص في هذه الكابتشا؟ أجب بالنص فقط.",
+                        "ما هو النص أو الأرقام الموجودة في هذه الكابتشا؟ أجب بالحل فقط بدقة.",
                         {"mime_type": "image/png", "data": f.read()}
                     ])
                 
                 solution = response.text.strip()
-                status_log.success(f"✅ تم الحل: {solution}")
-                
-                # إدخال الحل
-                input_box = await page.query_selector("input[type='text'], input[name*='captcha']")
-                if input_box:
-                    await input_box.fill(solution)
+                update_log(f"✅ الحل المقترح: {solution}")
+
+                # إدخال الحل تلقائياً
+                # نحاول البحث عن أكثر من نوع لخانة الإدخال
+                input_field = await page.query_selector("input[name*='captcha'], input[id*='captcha'], input[type='text']")
+                if input_field:
+                    await input_field.fill(solution)
+                    update_log("⌨️ تم إدخال الحل في الخانة المناسبة.")
                     await page.keyboard.press("Enter")
-                    status_log.success("🚀 تم إرسال الحل للموقع!")
+                    await asyncio.sleep(2)
                     
-                    # لقطة شاشة أخيرة للنتيجة
-                    await asyncio.sleep(3)
-                    await page.screenshot(path="result.png")
-                    screenshot_placeholder.image("result.png", caption="النتيجة بعد الحل")
+                    # لقطة نهائية للنتيجة
+                    await page.screenshot(path="final.png")
+                    screenshot_placeholder.image("final.png", caption="النتيجة بعد محاولة الحل")
             else:
-                status_log.error("❌ لم يتم العثور على كابتشا في هذه الصفحة")
+                update_log("❌ لم يتم العثور على كابتشا واضحة في هذه الصفحة.")
 
         except Exception as e:
-            status_log.error(f"حدث خطأ: {str(e)}")
-        
-        await browser.close()
+            st.error(f"حدث خطأ أثناء التنفيذ: {e}")
+        finally:
+            await browser.close()
+            update_log("🏁 تم إغلاق الجلسة.")
 
 if run_btn:
-    asyncio.run(solve_captcha_web())
+    asyncio.run(run_agent())
