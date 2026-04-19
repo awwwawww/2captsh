@@ -1,92 +1,94 @@
+import streamlit as st
 import os
 import subprocess
 import sys
 
-# 1. وظيفة التثبيت الإجباري (قبل أي استدعاء آخر)
-def initial_setup():
+# 1. تثبيت المكتبات في الخلفية فور تشغيل الموقع
+def install_packages():
     try:
         import playwright_stealth
-        import google.generativeai
     except ImportError:
-        # إذا لم يجد المكتبات، سيقوم بتثبيتها فوراً
         subprocess.check_call([sys.executable, "-m", "pip", "install", "playwright-stealth", "playwright", "google-generativeai"])
-        # تحميل المتصفح
-        subprocess.check_call([sys.executable, "-m", "playwright", "install", "chromium"])
-        # إعادة تشغيل التطبيق ليعمل بالمكتبات الجديدة
-        import streamlit as st
+        os.system("playwright install chromium")
         st.rerun()
 
-# تشغيل التثبيت
-initial_setup()
+# تنفيذ التثبيت أولاً
+install_packages()
 
-# الآن نستدعي المكتبات بأمان
-import streamlit as st
-import asyncio
-from playwright.async_api import async_playwright
-from playwright_stealth import stealth_async
-import google.generativeai as genai
-
-# --- واجهة التطبيق ---
+# --- إعدادات الواجهة ---
 st.set_page_config(page_title="AI Captcha Solver", layout="wide")
 st.title("🤖 AI Captcha Web Agent")
 
 with st.sidebar:
+    st.header("⚙️ الإعدادات")
     api_key = st.text_input("Gemini API Key", type="password")
     target_url = st.text_input("رابط الموقع", value="https://2captcha.com/enterpage")
-    run_btn = st.button("🚀 تشغيل الآن")
+    run_btn = st.button("🚀 تشغيل العميل")
 
 status = st.empty()
-image_col = st.empty()
+image_placeholder = st.empty()
 
-async def run_bot():
+# 2. دالة التشغيل التي تحتوي على الـ Imports بالداخل
+async def start_process():
+    # استدعاء المكتبات هنا (داخل الدالة) يمنع الـ ImportError عند بداية التشغيل
+    from playwright.async_api import async_playwright
+    from playwright_stealth import stealth_async
+    import google.generativeai as genai
+
     if not api_key:
-        st.error("يرجى إدخال API Key")
+        st.error("⚠️ يرجى إدخال مفتاح API أولاً")
         return
 
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel('gemini-1.5-flash')
 
     async with async_playwright() as p:
-        status.info("⏳ جاري فتح المتصفح...")
+        status.info("⏳ جاري فتح المتصفح بنجاح...")
         browser = await p.chromium.launch(headless=True)
-        page = await browser.new_page()
+        context = await browser.new_context()
+        page = await context.new_page()
+        
+        # تفعيل التخفي
         await stealth_async(page)
 
         try:
-            status.info(f"🔗 فتح الرابط: {target_url}")
+            status.info(f"🔗 الانتقال إلى: {target_url}")
             await page.goto(target_url, timeout=60000)
             await asyncio.sleep(5)
             
-            # لقطة شاشة للمعاينة
-            await page.screenshot(path="screen.png")
-            image_col.image("screen.png", caption="رؤية البوت الحالية")
+            # عرض رؤية البوت
+            await page.screenshot(path="live.png")
+            image_placeholder.image("live.png", caption="لقطة شاشة حية للموقع")
 
-            # البحث عن كابتشا
+            # البحث عن الكابتشا وحلها
             captcha = await page.query_selector("img[src*='captcha'], canvas, .captcha-img")
             if captcha:
                 status.warning("📸 تم العثور على كابتشا، جاري الحل...")
                 await captcha.screenshot(path="cap.png")
                 
                 with open("cap.png", "rb") as f:
-                    response = model.generate_content([
-                        "ما النص في الصورة؟ أجب بالنص فقط.",
+                    res = model.generate_content([
+                        "حل الكابتشا في هذه الصورة، أجب بالنص فقط.",
                         {"mime_type": "image/png", "data": f.read()}
                     ])
                 
-                ans = response.text.strip()
-                status.success(f"✅ تم الحل: {ans}")
+                solution = res.text.strip()
+                status.success(f"✅ الحل المستخرج: {solution}")
 
                 input_box = await page.query_selector("input[type='text'], input[name*='captcha']")
                 if input_box:
-                    await input_box.fill(ans)
+                    await input_box.fill(solution)
                     await page.keyboard.press("Enter")
-                    status.success("🚀 تم إرسال الحل!")
+                    status.success("🚀 تم الإرسال!")
             else:
                 status.error("❌ لم يتم العثور على كابتشا")
 
         except Exception as e:
-            st.error(f"خطأ: {e}")
-        await browser.close()
+            st.error(f"حدث خطأ: {e}")
+        finally:
+            await browser.close()
 
+# 3. تشغيل الدالة عند ضغط الزر
 if run_btn:
-    asyncio.run(run_bot())
+    import asyncio
+    asyncio.run(start_process())
