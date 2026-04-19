@@ -5,6 +5,8 @@ from playwright_stealth import stealth_async
 import google.generativeai as genai
 import os
 from datetime import datetime
+import os
+os.system("playwright install chromium")
 
 st.set_page_config(page_title="AI Captcha Solver Web", layout="wide")
 
