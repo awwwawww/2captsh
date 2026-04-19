@@ -1,4 +1,1 @@
 streamlit
-playwright
-playwright-stealth
-google-generativeai
