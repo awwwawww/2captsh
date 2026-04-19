@@ -1,94 +1,41 @@
 import streamlit as st
+import asyncio
 import os
-import subprocess
-import sys
 
-# 1. تثبيت المكتبات في الخلفية فور تشغيل الموقع
-def install_packages():
-    try:
-        import playwright_stealth
-    except ImportError:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "playwright-stealth", "playwright", "google-generativeai"])
-        os.system("playwright install chromium")
-        st.rerun()
+# محاولة الاستدعاء
+try:
+    from playwright.async_api import async_playwright
+    from playwright_stealth import stealth_async
+    import google.generativeai as genai
+except ImportError:
+    st.error("المكتبات لا تزال في طور التثبيت... يرجى الانتظار دقيقة وعمل Refresh للصفحة.")
+    st.stop()
 
-# تنفيذ التثبيت أولاً
-install_packages()
-
-# --- إعدادات الواجهة ---
 st.set_page_config(page_title="AI Captcha Solver", layout="wide")
 st.title("🤖 AI Captcha Web Agent")
 
 with st.sidebar:
-    st.header("⚙️ الإعدادات")
     api_key = st.text_input("Gemini API Key", type="password")
     target_url = st.text_input("رابط الموقع", value="https://2captcha.com/enterpage")
-    run_btn = st.button("🚀 تشغيل العميل")
+    run_btn = st.button("🚀 تشغيل الآن")
 
-status = st.empty()
-image_placeholder = st.empty()
-
-# 2. دالة التشغيل التي تحتوي على الـ Imports بالداخل
-async def start_process():
-    # استدعاء المكتبات هنا (داخل الدالة) يمنع الـ ImportError عند بداية التشغيل
-    from playwright.async_api import async_playwright
-    from playwright_stealth import stealth_async
-    import google.generativeai as genai
-
-    if not api_key:
-        st.error("⚠️ يرجى إدخال مفتاح API أولاً")
-        return
-
+async def run_logic():
+    # التأكد من تحميل المتصفح داخل السيرفر
+    os.system("playwright install chromium")
+    
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel('gemini-1.5-flash')
 
     async with async_playwright() as p:
-        status.info("⏳ جاري فتح المتصفح بنجاح...")
         browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context()
-        page = await context.new_page()
-        
-        # تفعيل التخفي
+        page = await browser.new_page()
         await stealth_async(page)
+        
+        await page.goto(target_url)
+        st.info("تم فتح الموقع بنجاح، جاري فحص الكابتشا...")
+        await page.screenshot(path="screen.png")
+        st.image("screen.png")
+        await browser.close()
 
-        try:
-            status.info(f"🔗 الانتقال إلى: {target_url}")
-            await page.goto(target_url, timeout=60000)
-            await asyncio.sleep(5)
-            
-            # عرض رؤية البوت
-            await page.screenshot(path="live.png")
-            image_placeholder.image("live.png", caption="لقطة شاشة حية للموقع")
-
-            # البحث عن الكابتشا وحلها
-            captcha = await page.query_selector("img[src*='captcha'], canvas, .captcha-img")
-            if captcha:
-                status.warning("📸 تم العثور على كابتشا، جاري الحل...")
-                await captcha.screenshot(path="cap.png")
-                
-                with open("cap.png", "rb") as f:
-                    res = model.generate_content([
-                        "حل الكابتشا في هذه الصورة، أجب بالنص فقط.",
-                        {"mime_type": "image/png", "data": f.read()}
-                    ])
-                
-                solution = res.text.strip()
-                status.success(f"✅ الحل المستخرج: {solution}")
-
-                input_box = await page.query_selector("input[type='text'], input[name*='captcha']")
-                if input_box:
-                    await input_box.fill(solution)
-                    await page.keyboard.press("Enter")
-                    status.success("🚀 تم الإرسال!")
-            else:
-                status.error("❌ لم يتم العثور على كابتشا")
-
-        except Exception as e:
-            st.error(f"حدث خطأ: {e}")
-        finally:
-            await browser.close()
-
-# 3. تشغيل الدالة عند ضغط الزر
-if run_btn:
-    import asyncio
-    asyncio.run(start_process())
+if run_btn and api_key:
+    asyncio.run(run_logic())
